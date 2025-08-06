@@ -1,5 +1,6 @@
 #define _USE_MATH_DEFINES
-
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h" 
 #include <cstdlib>
 #include <cmath>
 #include <iostream>
@@ -21,6 +22,54 @@ static int isCollision = 0; // Is there collision between the car and a cube?
 static unsigned int car; // Display lists base index.
 static int frameCount = 0; // Number of frames
 static int isWin = 0; // Flag to check if the car has reached the goal.
+
+float light1Pos[] = { xVal + 20, 0.0, zVal, 1.0 }; // Spotlight position.
+float light2Pos[] = { xVal - 20, 0.0, zVal, 1.0 }; // Spotlight position.
+static float spotAngle = 20.0; // Spotlight cone half-angle.
+float spotDirection[] = { 0.0, 0.0, -1.0 }; // Spotlight direction.
+static float spotExponent = 10.0; // Spotlight attenuation exponent.
+static float xMove = 0.0, zMove = 0.0; // Movement components.
+
+GLuint skyTextureID, groundTextureID1, groundTextureID2, groundTextureIDcurrent;
+GLuint textureID;
+
+
+GLuint loadTexture(const char* filename) {
+    int width, height, channels;
+
+    // Load the image using stb_image
+    unsigned char* data = stbi_load(filename, &width, &height, &channels, 0);
+    if (!data) {
+        std::cerr << "Failed to load texture: " << filename << std::endl;
+        return 0; // Return 0 if the texture loading fails
+    }
+
+    // Generate a texture ID
+    GLuint textureID;
+    glGenTextures(1, &textureID);
+
+    // Bind the texture ID
+    glBindTexture(GL_TEXTURE_2D, textureID);
+
+    // Determine the format based on the number of channels
+    GLenum format = (channels == 4) ? GL_RGBA : GL_RGB;
+
+    // Upload the texture data
+    glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+    glGenerateMipmap(GL_TEXTURE_2D);
+
+    // Free the image memory
+    stbi_image_free(data);
+
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+    // Return the generated texture ID
+    return textureID;
+}
 
 
 // Routine to draw a bitmap character string.
@@ -104,7 +153,15 @@ void frameCounter(int value)
 // Initialization routine.
 void setup(void)
 {
+    glClearColor(0.0, 0.0, 0.0, 0.0);
     int i, j;
+
+    glEnable(GL_TEXTURE_2D); // Enable 2D texturing
+    // Load the textures for the sky and ground
+    skyTextureID = loadTexture("sky_texture.jpg");
+    groundTextureID1 = loadTexture("ground_1_texture.jpg");
+    groundTextureID2 = loadTexture("ground_2_texture.jpg");
+    groundTextureIDcurrent = groundTextureID1;
 
     car = glGenLists(1);
     glNewList(car, GL_COMPILE);
@@ -130,10 +187,56 @@ void setup(void)
             }
 
     glEnable(GL_DEPTH_TEST);
-    glClearColor(0.0, 0.0, 0.0, 0.0);
 
-    glutTimerFunc(0, frameCounter, 0); // Initial call of frameCounter().
+    // Turn on OpenGL lighting.
+    glEnable(GL_LIGHTING);
+
+    // Light property vectors.
+    float lightAmb[] = { 0.0, 0.0, 0.0, 1.0 };
+    float lightDifAndSpec[] = { 1.0, 1.0, 1.0, 1.0 };
+    float globAmb[] = { 0.05, 0.05, 0.05, 1.0 };
+
+    // Light properties.
+    glLightfv(GL_LIGHT0, GL_AMBIENT, lightAmb);
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, lightDifAndSpec);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, lightDifAndSpec);
+    glEnable(GL_LIGHT0); // Enable particular light source.
+
+    glLightfv(GL_LIGHT1, GL_AMBIENT, lightAmb);
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, lightDifAndSpec);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, lightDifAndSpec);
+    glEnable(GL_LIGHT1); // Enable particular light source.
+
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, globAmb); // Global ambient light.
+    glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_TRUE); // Enable local viewpoint.
+    // Material property vectors.
+    float matSpec[] = { 1.0, 1.0, 1.0, 1.0 };
+    float matShine[] = { 50.0 };
+
+    // Material properties shared by all the spheres.
+    glMaterialfv(GL_FRONT, GL_SPECULAR, matSpec);
+    glMaterialfv(GL_FRONT, GL_SHININESS, matShine);
+
+
+    // Set up sunlight (directional light representing sunset).
+
+    float sunlightAmb[] = { 0.25, 0.25, 0.25, 1.0 };
+    float sunlightDifAndSpec[] = { 1.0, 0.3, 0.0, 1.0 }; // Warm sunset colors (orange).
+    glLightfv(GL_LIGHT2, GL_AMBIENT, sunlightAmb);
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, sunlightDifAndSpec);
+    glLightfv(GL_LIGHT2, GL_SPECULAR, sunlightDifAndSpec);
+    glEnable(GL_LIGHT2); // Enable sunlight.
+
+    // Set light position (directional light simulating sunset).
+    float sunlightPos[] = { 1.0, -1.0, 0.0, 0.0 }; // Light coming from the horizon.
+    glLightfv(GL_LIGHT2, GL_POSITION, sunlightPos);
+
+    // Enable color material mode:
+    // The ambient and diffuse color of the front faces will track the color set by glColor().
+    glEnable(GL_COLOR_MATERIAL);
+    glColorMaterial(GL_FRONT, GL_AMBIENT_AND_DIFFUSE);
 }
+
 
 // Function to check if two spheres centered at (x1,y1,z1) and (x2,y2,z2) with
 // radius r1 and r2 intersect.
@@ -297,13 +400,96 @@ void resetGame(int value)
     glutPostRedisplay();
 }
 
+void drawWinLoseMessage(const char* message)
+{
+    // Disable lighting to ensure text is unaffected by lighting
+    glDisable(GL_LIGHTING);
+
+    // Set the text color to white (or any visible color)
+    glColor3f(1.0, 1.0, 1.0); // White text
+
+    // Position the text at a specific location in 3D space
+    glRasterPos3f(0.0, 10.0, -70.0); // Adjust position as needed
+
+    // Render the message
+    writeBitmapString((void*)font, (char*)message);
+
+    // Re-enable lighting after rendering the text
+    glEnable(GL_LIGHTING);
+}
+
+void drawSky() {
+
+    //face 1
+    glPushMatrix();
+    glEnable(GL_TEXTURE_2D); // Enable texture mapping
+    glBindTexture(GL_TEXTURE_2D, skyTextureID); // Bind the sky texture
+
+    glBegin(GL_QUADS);
+    // Define vertices and texture coordinates for the sky
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-500.0f, -25.0f, -250.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(500.0f, -25.0f, -250.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(500.0f, 500.0f, -250.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-500.0f, 500.0f, -250.0f);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D); // Disable texture mapping
+    glPopMatrix();
+
+    //face2
+    glPushMatrix();
+    glEnable(GL_TEXTURE_2D); // Enable texture mapping
+    glBindTexture(GL_TEXTURE_2D, skyTextureID); // Bind the sky texture
+
+    glBegin(GL_QUADS);
+    // Define vertices and texture coordinates for the sky
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-100.0f, -25.0f, 250.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(-100.0f, -25.0f, -250.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(-100.0f, 500.0f, -250.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-100.0f, 500.0f, 250.0f);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D); // Disable texture mapping
+    glPopMatrix();
 
 
+    //face3
+    glPushMatrix();
+    glEnable(GL_TEXTURE_2D); // Enable texture mapping
+    glBindTexture(GL_TEXTURE_2D, skyTextureID); // Bind the sky texture
+
+    glBegin(GL_QUADS);
+    // Define vertices and texture coordinates for the sky
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(100.0f, -25.0f, 250.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(100.0f, -25.0f, -250.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(100.0f, 500.0f, -250.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(100.0f, 500.0f, 250.0f);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D); // Disable texture mapping
+    glPopMatrix();
+}
+
+void drawGround() {
+    glPushMatrix();
+    glEnable(GL_TEXTURE_2D); // Enable texture mapping
+    glBindTexture(GL_TEXTURE_2D, groundTextureIDcurrent); // Bind the selected ground texture
+
+    glBegin(GL_QUADS);
+    // Define vertices and texture coordinates for the ground
+    glTexCoord2f(0.0f, 0.0f); glVertex3f(-500.0f, -15.0f, 250.0f);
+    glTexCoord2f(1.0f, 0.0f); glVertex3f(500.0f, -15.0f, 250.0f);
+    glTexCoord2f(1.0f, 1.0f); glVertex3f(500.0f, -15.0f, -250.0f);
+    glTexCoord2f(0.0f, 1.0f); glVertex3f(-500.0f, -15.0f, -250.0f);
+    glEnd();
+
+    glDisable(GL_TEXTURE_2D); // Disable texture mapping
+    glPopMatrix();
+}
 // Drawing routine.
 void drawScene(void)
 {
     frameCount++; // Increment number of frames every redraw.
-
     int i, j;
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -313,17 +499,17 @@ void drawScene(void)
 
     // Write text in isolated (i.e., before gluLookAt) translate block.
     glPushMatrix();
-    glColor3f(1.0, 0.0, 0.0);
+    glColor3f(0.0, 0.0, 0.0);
     glRasterPos3f(-28.0, 25.0, -30.0);
+
+    // Draw win/lose message
     if (isCollision)
     {
-        char message[] = "You Lose!...";
-        writeBitmapString((void*)font, message);
+        drawWinLoseMessage("You Lose!");
     }
     else if (isWin)
     {
-        char winMessage[] = "You Win!";
-        writeBitmapString((void*)font, winMessage);
+        drawWinLoseMessage("You Win!");
     }
 
     glPopMatrix();
@@ -332,31 +518,70 @@ void drawScene(void)
     // Fixed camera.
     gluLookAt(0.0, 10.0, 20.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0);
 
+    glPushAttrib(GL_TEXTURE_BIT);  // Save texture states
+    glDisable(GL_TEXTURE_2D);  // disable textures temporarily 
+
+    glPushMatrix();
+
+    // Spotlight properties in the camera's perspective.
+    light1Pos[0] = xVal + 20;
+    light1Pos[2] = zVal;
+    light2Pos[0] = xVal - 20;
+    light2Pos[2] = zVal;
+
+    spotDirection[0] = -sin((M_PI / 180.0) * angle);
+    spotDirection[2] = -cos((M_PI / 180.0) * angle);
+
+
+
+
+    // Spotlight position.
+    glLightfv(GL_LIGHT0, GL_POSITION, light1Pos);
+    glLightfv(GL_LIGHT1, GL_POSITION, light2Pos);
+    // Spotlight properties.
+    glLightf(GL_LIGHT0, GL_SPOT_CUTOFF, spotAngle);
+    glLightf(GL_LIGHT1, GL_SPOT_CUTOFF, spotAngle);
+    glLightfv(GL_LIGHT0, GL_SPOT_DIRECTION, spotDirection);
+    glLightfv(GL_LIGHT1, GL_SPOT_DIRECTION, spotDirection);
+    glLightf(GL_LIGHT0, GL_SPOT_EXPONENT, spotExponent);
+    glLightf(GL_LIGHT1, GL_SPOT_EXPONENT, spotExponent);
+
+    glPopMatrix();
+
     // Draw all the cubes in arraycubes.
     for (j = 0; j < COLUMNS; j++)
         for (i = 0; i < ROWS; i++)
             arrayCubes[i][j].draw();
     drawCar();
     drawGoal();
+
+    glPopAttrib();  // Restore the previous settings
+    //glEnable(GL_TEXTURE_2D);
+
+    glPushAttrib(GL_LIGHTING_BIT);  // Save lighting state to avoid accidental change to lighting
+    glDisable(GL_LIGHTING);  // Disable lighting for the following textured objects
+    // Set the texture environment mode to GL_REPLACE to avoid lighting effects
+    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+    //ADD TEXTURE HERE!
+    // 
+    // 
+    drawGround();
+    drawSky();
+
+    glPopAttrib();
+
     // End left viewport.
 
+
+
     // Begin right viewport.
+
+    glPushAttrib(GL_TEXTURE_BIT);  // Save texture states
+    glDisable(GL_TEXTURE_2D);  // disable textures temporarily 
+
     glViewport(width / 2.0, 0, width / 2.0, height);
     glLoadIdentity();
 
-    // Write text in isolated (i.e., before gluLookAt) translate block.
-    glPushMatrix();
-    glColor3f(1.0, 0.0, 0.0);
-    glRasterPos3f(-28.0, 25.0, -30.0);
-    char message1[] = "You Lose!...";
-    char message2[] = "You Win!";
-    if (isCollision) {
-        writeBitmapString((void*)font, message1);
-    }
-    else if (isWin) {
-        writeBitmapString((void*)font, message2);
-    }
-    glPopMatrix();
 
     // Draw a vertical line on the left of the viewport to separate the two viewports
     glColor3f(1.0, 1.0, 1.0);
@@ -378,12 +603,49 @@ void drawScene(void)
         1.0,
         0.0);
 
+    glPushMatrix();
+
+    // Update spotlight positions and directions based on car's position and orientation.
+    light1Pos[0] = xVal + 20.0 + 1.0 * cos((M_PI / 180.0) * angle);
+    light1Pos[2] = zVal + 1.0 * sin((M_PI / 180.0) * angle);
+    light2Pos[0] = xVal - 20.0 - 1.0 * cos((M_PI / 180.0) * angle);
+    light2Pos[2] = zVal - 1.0 * sin((M_PI / 180.0) * angle);
+
+    spotDirection[0] = -sin((M_PI / 180.0) * angle);
+    spotDirection[2] = -cos((M_PI / 180.0) * angle);
+
+    // Spotlight position.
+    glLightfv(GL_LIGHT0, GL_POSITION, light1Pos);
+    glLightfv(GL_LIGHT1, GL_POSITION, light2Pos);
+    // Spotlight properties.
+    glLightf(GL_LIGHT0, GL_SPOT_CUTOFF, spotAngle);
+    glLightf(GL_LIGHT1, GL_SPOT_CUTOFF, spotAngle);
+    glLightfv(GL_LIGHT0, GL_SPOT_DIRECTION, spotDirection);
+    glLightfv(GL_LIGHT1, GL_SPOT_DIRECTION, spotDirection);
+    glLightf(GL_LIGHT0, GL_SPOT_EXPONENT, spotExponent);
+    glLightf(GL_LIGHT1, GL_SPOT_EXPONENT, spotExponent);
+
+    glPopMatrix();
+
     // Draw all the cubes in arraycubes.
     for (j = 0; j < COLUMNS; j++)
         for (i = 0; i < ROWS; i++)
             arrayCubes[i][j].draw();
 
     drawGoal();
+
+    glPopAttrib();  // Restore the previous texture settings
+ /*   glEnable(GL_TEXTURE_2D);*/
+
+    //ADD TEXTURE HERE!
+    // 
+    drawGround();
+    drawSky();
+    // 
+    //drawSky();
+    //drawGround();
+
+
     // End right viewport.
 
     glutSwapBuffers();
@@ -410,6 +672,13 @@ void keyInput(unsigned char key, int x, int y)
     {
     case 27:
         exit(0);
+        break;
+    case 'g': // Toggle between groundTextureID1 and groundTextureID2
+        if (groundTextureIDcurrent == groundTextureID1)
+            groundTextureIDcurrent = groundTextureID2;
+        else
+            groundTextureIDcurrent = groundTextureID1;
+        glutPostRedisplay(); // Redisplay the scene with the updated texture.
         break;
     default:
         break;
@@ -476,7 +745,7 @@ int main(int argc, char** argv)
     printInteraction();
     glutInit(&argc, argv);
 
-    glutInitContextVersion(4, 3);
+    glutInitContextVersion(3, 3);
     glutInitContextProfile(GLUT_COMPATIBILITY_PROFILE);
 
     glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA | GLUT_DEPTH);
